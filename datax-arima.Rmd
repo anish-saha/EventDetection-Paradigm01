@@ -1,0 +1,102 @@
+---
+title: "Data X - ARIMA"
+author: "Sabrina Le"
+date: "4/25/2019"
+output: github_document
+---
+```{r}
+library(dplyr)
+library(astsa)
+library(TSA)
+library(forecast)
+library(ggplot2)
+crypto <- read.csv("/Users/sabrinaa_le/Downloads/baseline_def_kaggle.csv")
+```
+
+
+```{r}
+btc <- crypto %>%
+  select(close, X)
+btc$X <- btc$X+1
+ggplot(data = btc, aes(x = X, y = close)) + geom_line() + ggtitle("Bitcoin Closing Price Over Time") + xlab("Time Index") + ylab("BTC Closing Price")
+```
+
+
+```{r}
+#ARIMA model
+auto.arima(log(btc$close), trace = TRUE)
+```
+```{r, fig.show="hide", results="hide"}
+#evaluate ARIMA forecast values
+vec <- 0
+se <- 0
+for (i in 150:1798) {
+  mod_df <- btc[1:i, ]
+  modpred <- sarima.for(log(mod_df$close), 1, 0, 1, 0, 0, 0, 0, 0)
+  vec[(i - 149)] <- modpred$pred
+  se[(i - 149)] <- modpred$se
+}
+
+lower <- vec - 2*se
+upper <- vec + 2*se
+modmod <- btc$close[151:1799]
+actual <- log(modmod)
+sum(actual < lower) + sum(actual > upper)
+a <- which(actual < lower)
+b <- which(actual > upper)
+btc_mod <- c(a, b)
+index <- 1:length(vec)
+df <- data.frame(index, actual, vec, "act" = exp(actual), "vecexp" = exp(vec))
+```
+
+##Plot of Significant Events & Residuals
+
+In the graph below, every red dot symbolizes an anomaly. In this ARIMA case, an anomaly is an event in which the log of predicted BTC closing price is more than 2 SDs away from the log of the actual BTC closing price. After fitting an ARIMA model on the data, we discovered that 100 events were detected, which is 5.55% of the data, validating our 5% target in our naive approaches.
+
+We also graphed the residuals and plotted them against time. After taking the top 2.5% of the biggest residuals and flagging those as anomalies, we found out that most significant events happened during the Bitcoin bubble. 
+```{r}
+ggplot(df, aes(x=index , y=act)) + 
+  #geom_line(aes(x = index, y = act), colour="red") +
+  geom_line(aes(x = index, y = vecexp)) +
+  geom_point(data=df[btc_mod,], aes(x=index, y=vecexp), colour="red", size=0.6) + 
+  ggtitle("Significant Events using ARIMA") +
+  xlab("Time Index") +
+  ylab("BTC Closing Price")
+
+#residuals
+resid <- exp(actual) - exp(vec)
+df$resid <- resid
+crypto_mod <- crypto[151:1799,]
+df$sd <- crypto_mod$X7.Day.SD
+anomaly <- which(abs(resid) >= 2*df$sd)
+ggplot(df, aes(index, abs(resid))) + 
+  geom_point(size = 0.6) + 
+  #geom_point(data = df[anomaly,], aes(x = index, y=abs(resid)), colour = "red") + 
+  ggtitle("Residuals vs. Time") + 
+  xlab("Time Index") + 
+  ylab("Residuals") #+ geom_line(aes(index, 2*sd), col = "blue")                    
+
+nrow(df) * 0.05
+sort_resid <- order(abs(df$resid), decreasing = TRUE)
+sort_resid <- sort_resid[1:82]
+
+ggplot(df, aes(index, abs(resid))) + 
+  geom_point(size = 0.6) + 
+  geom_point(data = df[sort_resid,], aes(x = index, y=abs(resid)), colour = "red", size = 0.75) + 
+  ggtitle("Residuals vs. Time") + 
+  xlab("Time Index") + 
+  ylab("Absolute Value of Residuals") #+ geom_line(aes(index, 2*sd), col = "blue")
+
+ggplot(df, aes(x=index , y=act)) +
+  geom_line(aes(x = index, y = vecexp)) +
+  geom_point(data=df[sort_resid,], aes(x=index, y=vecexp), colour="red", size=1) + 
+  ggtitle("Significant Events by Residual Ranking") +
+  xlab("Time Index") +
+  ylab("BTC Closing Price")
+```
+
+
+
+
+
+
